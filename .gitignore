@@ -2,4 +2,4 @@
 zig-out/
 *.o
 .vscode/
-.git/
+lldb_pretty_printers.py
