@@ -41,14 +41,23 @@ pub const Memory = struct {
     }
 
     pub fn write(self: *Memory, address: u64, buffer: []const u8) !usize {
-        const result = try win.WriteProcessMemory(
+        const written = try win.WriteProcessMemory(
             self.process_handle, 
             @ptrFromInt(address), 
             buffer
         );
 
-        if (result.len == 0) return error.WriteFailed;
-        return result.len;
+        if (written == 0) return error.WriteFailed;
+        return written;
+    }
+
+    pub fn write_struct(self: *Memory, address: u64, comptime T: type, value: T) !void {
+        const bytes = std.mem.asBytes(&value);
+        const written = try self.write(address, bytes);
+        
+        if (written != @sizeOf(T)) {
+            return error.WriteIncomplete;
+        }
     }
     
     pub fn deinit(self: *Memory, allocator: std.mem.Allocator) void {
