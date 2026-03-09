@@ -1,7 +1,7 @@
 .{
 	.name = .memory,
     .version = "0.0.0",
-    .fingerprint = 0x907f7965b7872253,
+    .fingerprint = 0xea6d34355a309c17,
     .minimum_zig_version = "0.15.2",
     .dependencies = .{ },
 	

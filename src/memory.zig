@@ -3,7 +3,6 @@ const win = std.os.windows;
 
 const Process = @import("process.zig").Process;
 
-
 const PROCESS_ALL_ACCESS = 0x1F0FFF;
 
 extern "kernel32" fn OpenProcess(dwDesiredAccess: win.DWORD, bInheritHandle: win.BOOL, dwProcessId: win.DWORD) callconv(.winapi) win.HANDLE;
@@ -39,6 +38,17 @@ pub const Memory = struct {
         var buffer: [@sizeOf(T)]u8 = undefined;
         _ = try self.read(address, &buffer);
         return std.mem.bytesToValue(T, &buffer);
+    }
+
+    pub fn write(self: *Memory, address: u64, buffer: []const u8) !usize {
+        const result = try win.WriteProcessMemory(
+            self.process_handle, 
+            @ptrFromInt(address), 
+            buffer
+        );
+
+        if (result.len == 0) return error.WriteFailed;
+        return result.len;
     }
     
     pub fn deinit(self: *Memory, allocator: std.mem.Allocator) void {
