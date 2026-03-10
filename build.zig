@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
         exe.lto = .full; 
     }
 
-    exe.root_module.link_libc = true;
+    exe.root_module.link_libc = false;
 
     const asm_source = exe.getEmittedAsm();
     const install_asm = b.addInstallFile(asm_source, "bin/memory.s"); 
