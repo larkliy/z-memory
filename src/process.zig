@@ -21,6 +21,7 @@ extern "kernel32" fn Process32Next(hSnapshot: win.HANDLE, lppe: ?*PROCESSENTRY32
 pub const Process = struct {
     process_id: u32,
     name: []u8,
+    allocator: std.mem.Allocator,
 
     pub noinline fn getProcessByName(allocator: std.mem.Allocator, name: []const u8) !Process {
 
@@ -43,7 +44,8 @@ pub const Process = struct {
             if (std.mem.eql(u8, sliced_name, name)) {
                 const process = Process { 
                     .process_id = process_entry.th32ProcessID,
-                    .name = try allocator.dupe(u8, sliced_name)
+                    .name = try allocator.dupe(u8, sliced_name),
+                    .allocator = allocator,
                 };
 
                 return process;
@@ -56,7 +58,7 @@ pub const Process = struct {
         return error.ProcessNotFound;
     }
 
-    pub fn deinit(self: *Process, allocator: std.mem.Allocator) void {
-        allocator.free(self.name);
+    pub fn deinit(self: *Process) void {
+        self.allocator.free(self.name);
     }
 };

@@ -60,8 +60,8 @@ pub const Memory = struct {
         }
     }
     
-    pub fn deinit(self: *Memory, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Memory) void {
         _ = win.CloseHandle(self.process_handle);
-        self.process.deinit(allocator);
+        self.process.deinit();
     }
 };

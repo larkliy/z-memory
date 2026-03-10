@@ -10,7 +10,6 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .link_libc = true
         }),
     });
 
@@ -31,6 +30,8 @@ pub fn build(b: *std.Build) void {
         // LTO (Link Time Optimization)
         exe.lto = .full; 
     }
+
+    exe.root_module.link_libc = true;
 
     const asm_source = exe.getEmittedAsm();
     const install_asm = b.addInstallFile(asm_source, "bin/memory.s"); 
