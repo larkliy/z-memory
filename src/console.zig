@@ -1,15 +1,27 @@
 const std = @import("std");
+const win = std.os.windows;
+
+extern "kernel32" fn SetConsoleTitleA(name: win.LPCSTR) win.BOOL;
 
 pub const Console = struct {
     
     stdin: std.fs.File.Reader = undefined,
     stdout: std.fs.File.Writer = undefined,
+    allocator: std.mem.Allocator,
 
-    pub fn init(stdin_buffer: []u8, stdout_buffer: []u8) Console {
+    pub fn init(allocator: std.mem.Allocator, stdin_buffer: []u8, stdout_buffer: []u8) Console {
         return Console {
             .stdin = std.fs.File.stdin().reader(stdin_buffer),
-            .stdout = std.fs.File.stdout().writer(stdout_buffer)
+            .stdout = std.fs.File.stdout().writer(stdout_buffer),
+            .allocator = allocator
         };
+    }
+
+    pub fn set_title(self: *Console, title: []const u8) !void {
+        const c_title = try self.allocator.dupeZ(u8, title);
+        defer self.allocator.free(c_title);
+
+        _ = SetConsoleTitleA(c_title);
     }
 
     pub fn readLine(self: *Console) ![]u8 {
