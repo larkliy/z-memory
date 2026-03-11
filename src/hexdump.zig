@@ -6,11 +6,11 @@ fn printLine(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
 
     for (bytes, 0..) |byte, i| {
 
-        if (i < bytes.len) {
-           try list.print(allocator, " {X:0>2}", .{byte});
-        } else {
+        if (i > 0 and i % 4 == 0) {
             try list.appendSlice(allocator, "   ");
         }
+        
+        try list.print(allocator, " {X:0>2}", .{byte});
     }
 
     try list.appendSlice(allocator,"  | ");
@@ -31,7 +31,7 @@ fn printLine(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
     return try list.toOwnedSlice(allocator);
 }
 
-pub fn dump(allocator: std.mem.Allocator, bytes: []const u8, line_size: usize) ![]u8 {
+pub fn dump(allocator: std.mem.Allocator, start_address: usize, bytes: []const u8, line_size: usize) ![]u8 {
     var list = std.ArrayList(u8).empty;
 
     var buffer = try allocator.alloc(u8, line_size);
@@ -39,12 +39,14 @@ pub fn dump(allocator: std.mem.Allocator, bytes: []const u8, line_size: usize) !
 
     var buf_idx: usize = 0;
 
-    for (bytes) |byte| {
+    for (bytes, 0..) |byte, current_offset| {
 
         buffer[buf_idx] = byte;
         buf_idx += 1;
 
         if (buf_idx == line_size) {
+            try list.print(allocator, "[{X:0>16}]", .{ (start_address + current_offset) - (line_size - 1) });
+
             const line = try printLine(allocator, buffer[0..buf_idx]);
             defer allocator.free(line);
 
@@ -56,6 +58,7 @@ pub fn dump(allocator: std.mem.Allocator, bytes: []const u8, line_size: usize) !
     }
 
     if (buf_idx > 0) {
+        try list.print(allocator, "[{X:0>16}]", .{start_address + bytes.len - buf_idx});
         const line = try printLine(allocator, buffer[0..buf_idx]);
         defer allocator.free(line);
         

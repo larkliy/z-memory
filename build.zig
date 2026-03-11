@@ -22,12 +22,11 @@ pub fn build(b: *std.Build) void {
         mod.omit_frame_pointer = true;
         mod.pic = true;
 
-        exe.root_module.strip = true;
+        exe.root_module.strip = false;
         exe.link_gc_sections = true;
         exe.link_function_sections = true;
         exe.link_data_sections = true;
         
-        // LTO (Link Time Optimization)
         exe.lto = .full; 
     }
 

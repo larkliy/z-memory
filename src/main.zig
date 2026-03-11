@@ -47,7 +47,7 @@ pub fn main() !void {
 
     while (true) {
         if (!is_example_printed) {
-            try con.write("Before everything write the command 'attach <ProcessName>' to attach the specified process.'");
+            try con.writeln("Before everything write the command 'attach <ProcessName>' to attach the specified process.'");
             try con.writeln("And after put the command like this: readbytes <AddressInHex> <SizeInDecimal>");
             try con.writeln("Or: write <AddressInHex> <Type[int, float, string]> <Value>");
             try con.writeln("Example: read 0x00400000 10");
@@ -159,11 +159,7 @@ fn handleReadBytes(allocator: std.mem.Allocator, memory: *mem.Memory, con: *cons
 
     try con.writeln("Read bytes: ");
 
-    // for (read_buf[0..read]) |byte| {
-    //     try con.print("{X:0>2} ", .{byte});
-    // }
-
-    try printBytesPretty(allocator, con, read_buf);
+    try printBytesPretty(allocator, address, con, read_buf);
 
     try con.writeln("");
 }
@@ -194,8 +190,8 @@ fn handleWrite(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.
     try con.writeln("Successfully!");
 }
 
-fn printBytesPretty(allocator: std.mem.Allocator, con: *console.Console, bytes: []const u8) !void {
-    const dump = try hexdump.dump(allocator, bytes, 10);
+fn printBytesPretty(allocator: std.mem.Allocator, start_address: usize, con: *console.Console, bytes: []const u8) !void {
+    const dump = try hexdump.dump(allocator, start_address, bytes, 12);
     defer allocator.free(dump);
 
     try con.write(dump);
