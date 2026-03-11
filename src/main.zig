@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = @import("memory.zig");
 const console = @import("console.zig");
 const hexdump = @import("hexdump.zig");
+const proc = @import("process.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -14,7 +15,7 @@ pub fn main() !void {
     var con = console.Console.init(allocator, &stdin_buffer, &stdout_buffer);
     try con.set_title("Z-Memory");
 
-    try con.writeln("Welcome to z-memory!");
+    con.writeln("Welcome to z-memory!");
 
     var memory: ?mem.Memory = null;
     defer if (memory) |*mem_ptr| mem_ptr.deinit();
@@ -47,33 +48,34 @@ pub fn main() !void {
 
     while (true) {
         if (!is_example_printed) {
-            try con.writeln("Before everything write the command 'attach <ProcessName>' to attach the specified process.'");
-            try con.writeln("And after put the command like this: readbytes <AddressInHex> <SizeInDecimal>");
-            try con.writeln("Or: write <AddressInHex> <Type[int, float, string]> <Value>");
-            try con.writeln("Example: read 0x00400000 10");
-            try con.writeln("Enter the 'exit' command to quit.");
+            con.writeln("Before everything write the command 'attach <ProcessName>' to attach the specified process.'");
+            con.writeln("And after put the command like this: readbytes <AddressInHex> <SizeInDecimal>");
+            con.writeln("Or: write <AddressInHex> <Type[int, float, string]> <Value>");
+            con.writeln("Example: read 0x00400000 10");
+            con.writeln("Enter the 'ps [filter(optional)] command to list processes on this machine.");
+            con.writeln("Enter the 'exit' command to quit.");
 
-            try con.writeln("");
-            try con.writeln("");
+            con.writeln("");
+            con.writeln("");
             is_example_printed = true;
         }
 
         // Process attach status
-        try con.print("{s} >", .{if (memory) |mem_ptr| mem_ptr.process.name else "Unattached"});
+        con.print("{s} >", .{if (memory) |mem_ptr| mem_ptr.process.name else "Unattached"});
 
-        const command = try con.readLine();
+        const command = con.readLine();
 
         if (!try handleCommands(allocator, &memory, &con, command, false))
             break;
 
-        try con.writeln("");
+        con.writeln("");
     }
 }
 
 fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *console.Console, command: []const u8, is_cmd_args: bool) !bool {
 
     if (std.mem.startsWith(u8, command, "exit")) {
-        try con.write("Exit...");
+        con.write("Exit...");
         return false;
     } else if (std.mem.startsWith(u8, command, "attach")) {
         if (memory.*) |*mem_ptr| mem_ptr.deinit();
@@ -86,18 +88,23 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
             return true;
 
         try handleReadBytes(allocator, &memory.*.?, con, command);
+        
     } else if (std.mem.startsWith(u8, command, "write")) {
+
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleWrite(allocator, &memory.*.?, con, command);
-
+    }
+    else if (std.mem.startsWith(u8, command, "ps")) {
+        
+        try handlePs(allocator, con, command);
 
     } else {
         if (is_cmd_args) {
             return error.InvalidCommand;
         } else {
-            try con.writeln("Unknown command!");
+            con.writeln("Unknown command!");
         }
     }
 
@@ -107,47 +114,74 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
 
 fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
     if (memory == null) {
-        try con.write("Process is not attached.");
+        con.write("Process is not attached.");
         return false;
     }
 
     return true;
 }
 
-fn attachToProcess(allocator: std.mem.Allocator, command: []const u8) !mem.Memory {
-    var args_list = try makeCommandArgsList(allocator, command);
-    defer args_list.deinit(allocator);
+fn handlePs(allocator: std.mem.Allocator, con: *console.Console, command: []const u8) !void {
+    const args = try makeCommandArgsList(allocator, command);
+    defer allocator.free(args);
 
-    if (args_list.items.len != 2)
+    var filter_options: proc.ProcessFilterOptions = undefined;
+
+    if (args.len > 1) {
+        const filter_string = args[1];
+        filter_options = .{ .should_filter = true,  .filter_string = filter_string };
+    } else {
+        filter_options = .{ .should_filter = false,  .filter_string = "" };
+    }
+
+    const processes = try proc.Process.getProcesses(allocator, filter_options);
+
+    defer { 
+        for (processes) |*process| process.deinit();
+        allocator.free(processes);
+    }
+
+    for (processes) |*process| {
+        con.println("Name: {s} | ID: {d}", .{ process.name, process.process_id });
+    }
+    
+    con.writeln("");
+}
+
+fn attachToProcess(allocator: std.mem.Allocator, command: []const u8) !mem.Memory {
+    const args = try makeCommandArgsList(allocator, command);
+    defer allocator.free(args);
+
+    if (args.len != 2)
         return error.AttachArgsCountNotMatch;
 
-    const process_name = args_list.items[1];
+    const process_name = args[1];
     const memory = mem.Memory.init(allocator, process_name);
 
     return memory;
 }
 
-fn makeCommandArgsList(allocator: std.mem.Allocator, command: []const u8) !std.ArrayList([]const u8) {
+fn makeCommandArgsList(allocator: std.mem.Allocator, command: []const u8) ![][]const u8 {
     var args_list = std.ArrayList([]const u8).empty;
 
     var it = std.mem.tokenizeScalar(u8, command, ' ');
     while (it.next()) |token|
         try args_list.append(allocator, token);
 
-    return args_list;
+    return try args_list.toOwnedSlice(allocator);
 }
 
 fn handleReadBytes(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.Console, command: []const u8) !void {
-    var args_list = try makeCommandArgsList(allocator, command);
-    defer args_list.deinit(allocator);
+    const args = try makeCommandArgsList(allocator, command);
+    defer allocator.free(args);
 
-    if (args_list.items.len != 3)
+    if (args.len != 3)
         return error.InvalidReadArgsCount;
 
-    const address_str = args_list.items[1];
+    const address_str = args[1];
     const address = try std.fmt.parseInt(usize, address_str, 16);
 
-    const read_size_str = args_list.items[2];
+    const read_size_str = args[2];
     const read_size = try std.fmt.parseInt(u32, read_size_str, 10);
 
     const read_buf = try allocator.alloc(u8, read_size);
@@ -155,27 +189,27 @@ fn handleReadBytes(allocator: std.mem.Allocator, memory: *mem.Memory, con: *cons
 
     const read = try memory.read(address, read_buf);
 
-    try con.println("Read bytes size: {d}", .{read});
+    con.println("Read bytes size: {d}", .{read});
 
-    try con.writeln("Read bytes: ");
+    con.writeln("Read bytes: ");
 
     try printBytesPretty(allocator, address, con, read_buf);
 
-    try con.writeln("");
+    con.writeln("");
 }
 
 fn handleWrite(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.Console, command: []const u8) !void {
-    var args_list = try makeCommandArgsList(allocator, command);
-    defer args_list.deinit(allocator);
+    const args = try makeCommandArgsList(allocator, command);
+    defer allocator.free(args);
 
-    if (args_list.items.len != 4)
+    if (args.len != 4)
         return error.InvalidWriteArgsCount;
 
-    const address_str = args_list.items[1];
+    const address_str = args[1];
     const address = try std.fmt.parseInt(usize, address_str, 16);
 
-    const type_name = args_list.items[2];
-    const value = args_list.items[3];
+    const type_name = args[2];
+    const value = args[3];
 
     if (std.mem.eql(u8, type_name, "int")) {
         const val = try std.fmt.parseInt(u32, value, 10);
@@ -187,12 +221,12 @@ fn handleWrite(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.
         _ = try memory.write(address, value);
     }
 
-    try con.writeln("Successfully!");
+    con.writeln("Successfully!");
 }
 
 fn printBytesPretty(allocator: std.mem.Allocator, start_address: usize, con: *console.Console, bytes: []const u8) !void {
     const dump = try hexdump.dump(allocator, start_address, bytes, 12);
     defer allocator.free(dump);
 
-    try con.write(dump);
+    con.write(dump);
 }

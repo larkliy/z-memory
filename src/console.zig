@@ -24,34 +24,34 @@ pub const Console = struct {
         _ = SetConsoleTitleA(c_title);
     }
 
-    pub fn readLine(self: *Console) ![]u8 {
-        const slice = try self.stdin.interface.takeDelimiter('\n');
+    pub fn readLine(self: *Console) []u8 {
+        const slice = self.stdin.interface.takeDelimiter('\n') catch unreachable;
         return slice.?[0..slice.?.len - 1];
     }
 
-    pub fn pause(self: *Console) !void {
-        _ = try self.stdin.interface.takeByte();
+    pub fn pause(self: *Console) void {
+        _ = self.stdin.interface.takeByte() catch return;
     }
 
-    pub fn write(self: *Console, data: []const u8) !void {
-        try self.stdout.interface.writeAll(data);
-        try self.stdout.interface.flush();
+    pub fn write(self: *Console, data: []const u8) void {
+        self.stdout.interface.writeAll(data) catch return;
+        self.stdout.interface.flush() catch return;
     }
 
-    pub fn writeln(self: *Console, data: []const u8) !void {
-        try self.stdout.interface.writeAll(data);
-        try self.stdout.interface.writeAll("\n");
-        try self.stdout.interface.flush();
+    pub fn writeln(self: *Console, data: []const u8) void {
+        self.write(data);
+        self.write("\n");
+        self.stdout.interface.flush() catch return;
     }
 
-    pub fn println(self: *Console, comptime fmt: []const u8, args: anytype) !void {
-        try self.stdout.interface.print(fmt, args);
-        try self.stdout.interface.writeAll("\n");
-        try self.stdout.interface.flush();
+    pub fn println(self: *Console, comptime fmt: []const u8, args: anytype) void {
+        self.print(fmt, args);
+        self.write("\n");
+        self.stdout.interface.flush() catch return;
     }
 
-    pub fn print(self: *Console, comptime fmt: []const u8, args: anytype) !void {
-        try self.stdout.interface.print(fmt, args);
-        try self.stdout.interface.flush();
+    pub fn print(self: *Console, comptime fmt: []const u8, args: anytype) void {
+        self.stdout.interface.print(fmt, args) catch return;
+        self.stdout.interface.flush() catch return;
     }
 };
