@@ -30,15 +30,15 @@ pub fn main() !void {
             return error.TooFewProcessAttachArgs;
 
         const process_name = args_slice[0];
-        
+
         const attach_str = try std.fmt.allocPrint(allocator, "attach {s}", .{process_name});
         defer allocator.free(attach_str);
 
         memory = try attachToProcess(allocator, attach_str);
-        
+
         const command = try std.mem.join(allocator, " ", args_slice[1..]);
         defer allocator.free(command);
-        
+
         _ = try handleCommands(allocator, &memory, &con, command, true);
 
         return;
@@ -48,19 +48,10 @@ pub fn main() !void {
 
     while (true) {
         if (!is_example_printed) {
-            con.writeln("Before everything write the command 'attach <ProcessName>' to attach the specified process.'");
-            con.writeln("And after put the command like this: readbytes <AddressInHex> <SizeInDecimal>");
-            con.writeln("Or: write <AddressInHex> <Type[int, float, string]> <Value>");
-            con.writeln("Example: read 0x00400000 10");
-            con.writeln("Enter the 'ps [filter(optional)] command to list processes on this machine.");
-            con.writeln("Enter the 'exit' command to quit.");
-
-            con.writeln("");
-            con.writeln("");
+            printHelpMessage(&con);
             is_example_printed = true;
         }
 
-        // Process attach status
         con.print("{s} >", .{if (memory) |mem_ptr| mem_ptr.process.name else "Unattached"});
 
         const command = con.readLine();
@@ -73,7 +64,6 @@ pub fn main() !void {
 }
 
 fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *console.Console, command: []const u8, is_cmd_args: bool) !bool {
-
     if (std.mem.startsWith(u8, command, "exit")) {
         con.write("Exit...");
         return false;
@@ -81,25 +71,20 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
         if (memory.*) |*mem_ptr| mem_ptr.deinit();
 
         memory.* = try attachToProcess(allocator, command);
-
     } else if (std.mem.startsWith(u8, command, "readbytes")) {
-
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleReadBytes(allocator, &memory.*.?, con, command);
-        
     } else if (std.mem.startsWith(u8, command, "write")) {
-
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleWrite(allocator, &memory.*.?, con, command);
-    }
-    else if (std.mem.startsWith(u8, command, "ps")) {
-        
+    } else if (std.mem.startsWith(u8, command, "ps")) {
         try handlePs(allocator, con, command);
-
+    } else if (std.mem.startsWith(u8, command, "help")) {
+        printHelpMessage(con);
     } else {
         if (is_cmd_args) {
             return error.InvalidCommand;
@@ -108,8 +93,35 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
         }
     }
 
-
     return true;
+}
+
+fn printHelpMessage(con: *console.Console) void {
+    const help_text = 
+        \\╔════════════════════════════════════════════════════════╗
+        \\║                 🛠  Z-Memory Help Menu                  ║
+        \\╠════════════════════════════════════════════════════════╣
+        \\║ Attach a process:                                      ║
+        \\║   attach <ProcessName>                                 ║
+        \\║                                                        ║
+        \\║ Read memory:                                           ║
+        \\║   readbytes <AddressInHex> <SizeInDecimal>             ║
+        \\║                                                        ║
+        \\║ Write memory:                                          ║
+        \\║   write <AddressInHex> <Type[int,float,string]> <Value>║
+        \\║                                                        ║
+        \\║ List processes:                                        ║
+        \\║   ps [filter(optional)]                                ║
+        \\║                                                        ║
+        \\║ Show help menu:                                        ║
+        \\║   help                                                 ║
+        \\║                                                        ║
+        \\║ Exit the program:                                      ║
+        \\║   exit                                                 ║
+        \\╚════════════════════════════════════════════════════════╝
+        \\
+    ;
+    con.write(help_text);
 }
 
 fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
@@ -129,14 +141,14 @@ fn handlePs(allocator: std.mem.Allocator, con: *console.Console, command: []cons
 
     if (args.len > 1) {
         const filter_string = args[1];
-        filter_options = .{ .should_filter = true,  .filter_string = filter_string };
+        filter_options = .{ .should_filter = true, .filter_string = filter_string };
     } else {
-        filter_options = .{ .should_filter = false,  .filter_string = "" };
+        filter_options = .{ .should_filter = false, .filter_string = "" };
     }
 
     const processes = try proc.Process.getProcesses(allocator, filter_options);
 
-    defer { 
+    defer {
         for (processes) |*process| process.deinit();
         allocator.free(processes);
     }
@@ -144,7 +156,7 @@ fn handlePs(allocator: std.mem.Allocator, con: *console.Console, command: []cons
     for (processes) |*process| {
         con.println("Name: {s} | ID: {d}", .{ process.name, process.process_id });
     }
-    
+
     con.writeln("");
 }
 

@@ -69,35 +69,23 @@ pub const Process = struct {
     }
 
     pub fn getProcessByName(allocator: std.mem.Allocator, name: []const u8) !Process {
+        const processes = try getProcesses(allocator, .{ 
+            .should_filter = true, 
+            .filter_string = name
+        });
 
-        const snapshot = CreateToolhelp32Snapshot(win.TH32CS_SNAPPROCESS, 0);
+        defer allocator.free(processes);
 
-        if (snapshot == win.INVALID_HANDLE_VALUE)
-            return error.SnapshotNotFound;
+        for (processes) |*proc| {
+            defer proc.deinit();
 
-        defer _ = win.CloseHandle(snapshot);
-
-        var process_entry: PROCESSENTRY32 = undefined;
-        process_entry.dwSize = @sizeOf(PROCESSENTRY32);
-
-        if (Process32First(snapshot, &process_entry) == win.FALSE)
-            return error.ProcessNotFound;
-
-        while (true) {
-            const sliced_name = std.mem.sliceTo(&process_entry.szExeFile, 0);
-
-            if (std.mem.eql(u8, sliced_name, name)) {
-                const process = Process { 
-                    .process_id = process_entry.th32ProcessID,
-                    .name = try allocator.dupe(u8, sliced_name),
+            if (std.mem.eql(u8, proc.name, name)) { 
+                return Process {
                     .allocator = allocator,
+                    .name = try allocator.dupe(u8, proc.name),
+                    .process_id = proc.process_id
                 };
-
-                return process;
             }
-
-            if (Process32Next(snapshot, &process_entry) == win.FALSE)
-                break;
         }
 
         return error.ProcessNotFound;

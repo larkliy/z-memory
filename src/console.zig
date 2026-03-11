@@ -2,6 +2,8 @@ const std = @import("std");
 const win = std.os.windows;
 
 extern "kernel32" fn SetConsoleTitleA(name: win.LPCSTR) win.BOOL;
+extern "kernel32" fn SetConsoleCP(wCodePageID: win.UINT) win.BOOL;
+extern "kernel32" fn SetConsoleOutputCP(wCodePageID: win.UINT) win.BOOL;
 
 pub const Console = struct {
     
@@ -10,6 +12,7 @@ pub const Console = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, stdin_buffer: []u8, stdout_buffer: []u8) Console {
+        enableUtf8Console();
         return Console {
             .stdin = std.fs.File.stdin().reader(stdin_buffer),
             .stdout = std.fs.File.stdout().writer(stdout_buffer),
@@ -53,5 +56,10 @@ pub const Console = struct {
     pub fn print(self: *Console, comptime fmt: []const u8, args: anytype) void {
         self.stdout.interface.print(fmt, args) catch return;
         self.stdout.interface.flush() catch return;
+    }
+
+    fn enableUtf8Console() void {
+        _ = SetConsoleCP(65001);
+        _ = SetConsoleOutputCP(65001);
     }
 };

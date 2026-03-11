@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
         mod.omit_frame_pointer = true;
         mod.pic = true;
 
-        exe.root_module.strip = false;
+        exe.root_module.strip = true;
         exe.link_gc_sections = true;
         exe.link_function_sections = true;
         exe.link_data_sections = true;
