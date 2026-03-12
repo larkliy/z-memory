@@ -4,8 +4,14 @@ const console = @import("console.zig");
 const hexdump = @import("hexdump.zig");
 const proc = @import("process.zig");
 
+pub const CommandOptions = struct {
+    allocator: std.mem.Allocator,
+    memory: *mem.Memory,
+    console: *console.Console,
+};
+
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -64,85 +70,49 @@ pub fn main() !void {
 }
 
 fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *console.Console, command: []const u8, is_cmd_args: bool) !bool {
+
+    var command_options = CommandOptions{
+        .allocator = allocator,
+        .console = con,
+        .memory = &memory.*.?
+    };
+    
     if (std.mem.startsWith(u8, command, "exit")) {
         con.write("Exit...");
         return false;
     } else if (std.mem.startsWith(u8, command, "attach")) {
-
         if (memory.*) |*mem_ptr| mem_ptr.deinit();
 
         memory.* = try attachToProcess(allocator, command);
-
     } else if (std.mem.startsWith(u8, command, "readbytes")) {
-
         if (!try isProcessAttached(memory.*, con))
             return true;
 
-        try handleReadBytes(allocator, &memory.*.?, con, command);
+        try handleReadBytes(&command_options, command);
 
     } else if (std.mem.startsWith(u8, command, "write")) {
-
         if (!try isProcessAttached(memory.*, con))
             return true;
 
-        try handleWrite(allocator, &memory.*.?, con, command);
-
+        try handleWrite(&command_options, command);
     } else if (std.mem.startsWith(u8, command, "ps")) {
-
-        try handlePs(allocator, con, command);
-
+        try handlePs(&command_options, command);
     } else if (std.mem.startsWith(u8, command, "readmod")) {
-
         if (!try isProcessAttached(memory.*, con))
             return true;
 
-        const args = try makeCommandArgsList(allocator, command);
-        defer allocator.free(args);
+        try handleReadMod(&command_options, command);
+    } else if (std.mem.startsWith(u8, command, "writeptr")) {
 
-        var module_and_addr = std.mem.tokenizeScalar(u8, args[1], '+');
+        // TODO
         
-        const module_name = module_and_addr.next().?;
-        const rel_address = try std.fmt.parseInt(usize, module_and_addr.next().?, 16);
-
-        var module = try memory.*.?.process.getModuleBaseAddress(module_name);
-        defer module.deinit();
-
-        const absolute_address = rel_address + module.base;
-
-        const type_name = args[2];
-
-        if (std.mem.eql(u8, type_name, "int")) {
-            const value = try memory.*.?.read_struct(absolute_address, i32);
-
-            con.print("Value: {d}", .{value});
-        } else if (std.mem.eql(u8, type_name, "float")) {
-            const value = try memory.*.?.read_struct(absolute_address, f32);
-
-            con.print("Value: {d}", .{value});
-        } else if (std.mem.startsWith(u8, type_name, "bytes:")) {
-
-            var type_and_size = std.mem.tokenizeScalar(u8, type_name, ':');
-
-            _  = type_and_size.next(); // "bytes" keyword
-
-            const read_size = try std.fmt.parseInt(u32, type_and_size.next().?, 10);
-            
-            const read_buf = try allocator.alloc(u8, read_size);
-            defer allocator.free(read_buf);
-
-            const read = try memory.*.?.read(absolute_address, read_buf);
-
-            con.println("Read bytes size: {d}", .{read});
-
-            con.writeln("Read bytes: ");
-
-            try printBytesPretty(allocator, absolute_address, con, read_buf);
-        }
+    } else if (std.mem.startsWith(u8, command, "writemod")) {
+        
+        try handleWriteMod(&command_options, command);
+        
 
     } else if (std.mem.startsWith(u8, command, "help")) {
-
         printHelpMessage(con);
-
     } else {
         if (is_cmd_args) {
             return error.InvalidCommand;
@@ -166,8 +136,11 @@ fn printHelpMessage(con: *console.Console) void {
         \\
         \\Read Module+Address with type support.
         \\  readmod   <module.dll+RelativeAddress> <int/float/string/bytes:size>
+        \\
         \\Write memory
         \\  write     <AddressInHex> <int/float/string> <Value>
+        \\
+        \\  writemod  <module.dll+RelativeAddress> <int/float/string> <Value>
         \\
         \\List processes
         \\  ps [filter(optional)]
@@ -181,6 +154,8 @@ fn printHelpMessage(con: *console.Console) void {
     ;
 
     con.write(help_text);
+
+    
 }
 
 fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
@@ -192,9 +167,86 @@ fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
     return true;
 }
 
-fn handlePs(allocator: std.mem.Allocator, con: *console.Console, command: []const u8) !void {
-    const args = try makeCommandArgsList(allocator, command);
-    defer allocator.free(args);
+fn handleWriteMod(options: *CommandOptions, command: []const u8) !void {
+    const args = try makeCommandArgsList(options.allocator, command);
+    defer options.allocator.free(args);
+
+    var module_and_addr = std.mem.tokenizeScalar(u8, args[1], '+');
+
+    const module_name = module_and_addr.next().?;
+    const rel_address_str = module_and_addr.next().?;
+
+    const rel_address = try std.fmt.parseInt(usize, rel_address_str, 16);
+
+    const absolute_address = try getAbsoluteAddress(options, module_name, rel_address);
+
+    const type_name = args[2];
+
+    if (std.mem.eql(u8, type_name, "int")) {
+        const val = try std.fmt.parseInt(u32, args[3], 10);
+        try options.memory.write_struct(absolute_address, u32, val);
+    } else if (std.mem.eql(u8, type_name, "float")) {
+        const val = try std.fmt.parseFloat(f32, args[3]);
+        try options.memory.write_struct(absolute_address, f32, val);
+    } else {
+        return error.InvalidWriteModType;
+    }
+}
+
+fn handleReadMod(options: *CommandOptions, command: []const u8) !void {
+
+    const args = try makeCommandArgsList(options.allocator, command);
+    defer options.allocator.free(args);
+
+    var module_and_addr = std.mem.tokenizeScalar(u8, args[1], '+');
+
+    const module_name = module_and_addr.next().?;
+    const rel_address_str = module_and_addr.next().?;
+    
+    const rel_address = try std.fmt.parseInt(usize, rel_address_str, 16);
+
+    const absolute_address = try getAbsoluteAddress(options, module_name, rel_address);
+
+    const type_name = args[2];
+
+    if (std.mem.eql(u8, type_name, "int")) {
+        const value = try options.memory.read_struct(absolute_address, i32);
+
+        options.console.print("Value: {d}", .{value});
+    } else if (std.mem.eql(u8, type_name, "float")) {
+        const value = try options.memory.read_struct(absolute_address, f32);
+
+        options.console.print("Value: {d}", .{value});
+    } else if (std.mem.startsWith(u8, type_name, "bytes:")) {
+        var type_and_size = std.mem.tokenizeScalar(u8, type_name, ':');
+
+        _ = type_and_size.next(); // "bytes" keyword
+
+        const read_size = try std.fmt.parseInt(u32, type_and_size.next().?, 10);
+
+        const read_buf = try options.allocator.alloc(u8, read_size);
+        defer options.allocator.free(read_buf);
+
+        const read = try options.memory.read(absolute_address, read_buf);
+
+        options.console.println("Read bytes size: {d}", .{read});
+
+        options.console.writeln("Read bytes: ");
+
+        try printBytesPretty(options, absolute_address, read_buf);
+    }
+}
+
+fn getAbsoluteAddress(options: *CommandOptions, module_name: []const u8, rel_address: usize) !usize {
+    var module = try options.memory.process.getModuleBaseAddress(module_name);
+    defer module.deinit();
+
+    return rel_address + module.base;
+}
+
+fn handlePs(options: *CommandOptions, command: []const u8) !void {
+    const args = try makeCommandArgsList(options.allocator, command);
+    defer options.allocator.free(args);
 
     var filter_options: proc.ProcessFilterOptions = undefined;
 
@@ -205,18 +257,18 @@ fn handlePs(allocator: std.mem.Allocator, con: *console.Console, command: []cons
         filter_options = .{ .should_filter = false, .filter_string = "" };
     }
 
-    const processes = try proc.Process.getProcesses(allocator, filter_options);
+    const processes = try proc.Process.getProcesses(options.allocator, filter_options);
 
     defer {
         for (processes) |*process| process.deinit();
-        allocator.free(processes);
+        options.allocator.free(processes);
     }
 
     for (processes) |*process| {
-        con.println("Name: {s} | ID: {d}", .{ process.name, process.process_id });
+        options.console.println("Name: {s} | ID: {d}", .{ process.name, process.process_id });
     }
 
-    con.writeln("");
+    options.console.writeln("");
 }
 
 fn attachToProcess(allocator: std.mem.Allocator, command: []const u8) !mem.Memory {
@@ -242,9 +294,9 @@ fn makeCommandArgsList(allocator: std.mem.Allocator, command: []const u8) ![][]c
     return try args_list.toOwnedSlice(allocator);
 }
 
-fn handleReadBytes(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.Console, command: []const u8) !void {
-    const args = try makeCommandArgsList(allocator, command);
-    defer allocator.free(args);
+fn handleReadBytes(options: *CommandOptions, command: []const u8) !void {
+    const args = try makeCommandArgsList(options.allocator, command);
+    defer options.allocator.free(args);
 
     if (args.len != 3)
         return error.InvalidReadArgsCount;
@@ -255,23 +307,23 @@ fn handleReadBytes(allocator: std.mem.Allocator, memory: *mem.Memory, con: *cons
     const read_size_str = args[2];
     const read_size = try std.fmt.parseInt(u32, read_size_str, 10);
 
-    const read_buf = try allocator.alloc(u8, read_size);
-    defer allocator.free(read_buf);
+    const read_buf = try options.allocator.alloc(u8, read_size);
+    defer options.allocator.free(read_buf);
 
-    const read = try memory.read(address, read_buf);
+    const read = try options.memory.read(address, read_buf);
 
-    con.println("Read bytes size: {d}", .{read});
+    options.console.println("Read bytes size: {d}", .{read});
 
-    con.writeln("Read bytes: ");
+    options.console.writeln("Read bytes: ");
 
-    try printBytesPretty(allocator, address, con, read_buf);
+    try printBytesPretty(options, address, read_buf);
 
-    con.writeln("");
+    options.console.writeln("");
 }
 
-fn handleWrite(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.Console, command: []const u8) !void {
-    const args = try makeCommandArgsList(allocator, command);
-    defer allocator.free(args);
+fn handleWrite(options: *CommandOptions, command: []const u8) !void {
+    const args = try makeCommandArgsList(options.allocator, command);
+    defer options.allocator.free(args);
 
     if (args.len != 4)
         return error.InvalidWriteArgsCount;
@@ -284,20 +336,20 @@ fn handleWrite(allocator: std.mem.Allocator, memory: *mem.Memory, con: *console.
 
     if (std.mem.eql(u8, type_name, "int")) {
         const val = try std.fmt.parseInt(u32, value, 10);
-        try memory.write_struct(address, u32, val);
+        try options.memory.write_struct(address, u32, val);
     } else if (std.mem.eql(u8, type_name, "float")) {
         const val = try std.fmt.parseFloat(f32, value);
-        try memory.write_struct(address, f32, val);
+        try options.memory.write_struct(address, f32, val);
     } else if (std.mem.eql(u8, type_name, "string")) {
-        _ = try memory.write(address, value);
+        _ = try options.memory.write(address, value);
     }
 
-    con.writeln("Successfully!");
+    options.console.writeln("Successfully!");
 }
 
-fn printBytesPretty(allocator: std.mem.Allocator, start_address: usize, con: *console.Console, bytes: []const u8) !void {
-    const dump = try hexdump.dump(allocator, start_address, bytes, 12);
-    defer allocator.free(dump);
+fn printBytesPretty(options: *CommandOptions, start_address: usize, bytes: []const u8) !void {
+    const dump = try hexdump.dump(options.allocator, start_address, bytes, 12);
+    defer options.allocator.free(dump);
 
-    con.write(dump);
+    options.console.write(dump);
 }
