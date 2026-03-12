@@ -18,6 +18,21 @@ extern "kernel32" fn CreateToolhelp32Snapshot(dwFlags: win.DWORD, th32ProcessID:
 extern "kernel32" fn Process32First(hSnapshot: win.HANDLE, lppe: ?*PROCESSENTRY32) callconv(.winapi) win.BOOL;
 extern "kernel32" fn Process32Next(hSnapshot: win.HANDLE, lppe: ?*PROCESSENTRY32) callconv(.winapi) win.BOOL;
 
+extern "kernel32" fn Module32First(hSnapshot: win.HANDLE, lpme: *win.MODULEENTRY32) callconv(.winapi) win.BOOL;
+extern "kernel32" fn Module32Next(hSnapshot: win.HANDLE, lpme: *win.MODULEENTRY32,) callconv(.winapi) win.BOOL;
+
+pub const ProcessModuleInfo = struct {
+    base: usize,
+    name: []const u8,
+    len: usize,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *ProcessModuleInfo) void {
+        self.allocator.free(self.name);
+    }
+};
+
+
 pub const ProcessFilterOptions = struct { 
     filter_string: []const u8,
     should_filter: bool
@@ -32,7 +47,7 @@ pub const Process = struct {
         var process_list = std.ArrayList(Process).empty;
 
         const snapshot = CreateToolhelp32Snapshot(win.TH32CS_SNAPPROCESS, 0);
-
+        
         if (snapshot == win.INVALID_HANDLE_VALUE)
             return error.SnapshotNotFound;
 
@@ -89,6 +104,42 @@ pub const Process = struct {
         }
 
         return error.ProcessNotFound;
+    }
+
+    pub fn getModuleBaseAddress(self: *Process, moduleName: []const u8) !ProcessModuleInfo {
+
+        const snapshot = CreateToolhelp32Snapshot(win.TH32CS_SNAPMODULE | win.TH32CS_SNAPMODULE32, self.process_id);
+        
+        if (snapshot == win.INVALID_HANDLE_VALUE)
+            return error.SnapshotNotFound;
+
+        defer _ = win.CloseHandle(snapshot);
+
+        var entry: win.MODULEENTRY32 = undefined;
+        entry.dwSize = @sizeOf(win.MODULEENTRY32);
+
+        if (Module32First(snapshot, &entry) == win.FALSE) 
+            return error.ModuleNotFound;
+
+        while (true) {
+
+            const module_name = std.mem.sliceTo(&entry.szModule, 0);
+
+            if (std.mem.eql(u8, module_name, moduleName)) {
+                return ProcessModuleInfo {
+                    .allocator = self.allocator,
+                    .base = @intFromPtr(entry.modBaseAddr),
+                    .len = entry.modBaseSize,
+                    .name = try self.allocator.dupe(u8, module_name)
+                };
+            }
+
+
+            if (Module32Next(snapshot, &entry) == win.FALSE)
+                break;
+        }
+
+        return error.ModuleNotFound;
     }
 
     pub fn deinit(self: *Process) void {

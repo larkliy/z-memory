@@ -68,23 +68,81 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
         con.write("Exit...");
         return false;
     } else if (std.mem.startsWith(u8, command, "attach")) {
+
         if (memory.*) |*mem_ptr| mem_ptr.deinit();
 
         memory.* = try attachToProcess(allocator, command);
+
     } else if (std.mem.startsWith(u8, command, "readbytes")) {
+
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleReadBytes(allocator, &memory.*.?, con, command);
+
     } else if (std.mem.startsWith(u8, command, "write")) {
+
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleWrite(allocator, &memory.*.?, con, command);
+
     } else if (std.mem.startsWith(u8, command, "ps")) {
+
         try handlePs(allocator, con, command);
+
+    } else if (std.mem.startsWith(u8, command, "readmod")) {
+
+        if (!try isProcessAttached(memory.*, con))
+            return true;
+
+        const args = try makeCommandArgsList(allocator, command);
+        defer allocator.free(args);
+
+        var module_and_addr = std.mem.tokenizeScalar(u8, args[1], '+');
+        
+        const module_name = module_and_addr.next().?;
+        const rel_address = try std.fmt.parseInt(usize, module_and_addr.next().?, 16);
+
+        var module = try memory.*.?.process.getModuleBaseAddress(module_name);
+        defer module.deinit();
+
+        const absolute_address = rel_address + module.base;
+
+        const type_name = args[2];
+
+        if (std.mem.eql(u8, type_name, "int")) {
+            const value = try memory.*.?.read_struct(absolute_address, i32);
+
+            con.print("Value: {d}", .{value});
+        } else if (std.mem.eql(u8, type_name, "float")) {
+            const value = try memory.*.?.read_struct(absolute_address, f32);
+
+            con.print("Value: {d}", .{value});
+        } else if (std.mem.startsWith(u8, type_name, "bytes:")) {
+
+            var type_and_size = std.mem.tokenizeScalar(u8, type_name, ':');
+
+            _  = type_and_size.next(); // "bytes" keyword
+
+            const read_size = try std.fmt.parseInt(u32, type_and_size.next().?, 10);
+            
+            const read_buf = try allocator.alloc(u8, read_size);
+            defer allocator.free(read_buf);
+
+            const read = try memory.*.?.read(absolute_address, read_buf);
+
+            con.println("Read bytes size: {d}", .{read});
+
+            con.writeln("Read bytes: ");
+
+            try printBytesPretty(allocator, absolute_address, con, read_buf);
+        }
+
     } else if (std.mem.startsWith(u8, command, "help")) {
+
         printHelpMessage(con);
+
     } else {
         if (is_cmd_args) {
             return error.InvalidCommand;
@@ -97,30 +155,31 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
 }
 
 fn printHelpMessage(con: *console.Console) void {
-    const help_text = 
-        \\╔════════════════════════════════════════════════════════╗
-        \\║                 🛠  Z-Memory Help Menu                  ║
-        \\╠════════════════════════════════════════════════════════╣
-        \\║ Attach a process:                                      ║
-        \\║   attach <ProcessName>                                 ║
-        \\║                                                        ║
-        \\║ Read memory:                                           ║
-        \\║   readbytes <AddressInHex> <SizeInDecimal>             ║
-        \\║                                                        ║
-        \\║ Write memory:                                          ║
-        \\║   write <AddressInHex> <Type[int,float,string]> <Value>║
-        \\║                                                        ║
-        \\║ List processes:                                        ║
-        \\║   ps [filter(optional)]                                ║
-        \\║                                                        ║
-        \\║ Show help menu:                                        ║
-        \\║   help                                                 ║
-        \\║                                                        ║
-        \\║ Exit the program:                                      ║
-        \\║   exit                                                 ║
-        \\╚════════════════════════════════════════════════════════╝
+    const help_text =
+        \\Z-Memory Help
+        \\
+        \\Attach a process
+        \\  attach <ProcessName>
+        \\
+        \\Read memory
+        \\  readbytes <AddressInHex> <SizeInDecimal>
+        \\
+        \\Read Module+Address with type support.
+        \\  readmod   <module.dll+RelativeAddress> <int/float/string/bytes:size>
+        \\Write memory
+        \\  write     <AddressInHex> <int/float/string> <Value>
+        \\
+        \\List processes
+        \\  ps [filter(optional)]
+        \\
+        \\Show help
+        \\  help
+        \\
+        \\Exit
+        \\  exit
         \\
     ;
+
     con.write(help_text);
 }
 
