@@ -21,7 +21,7 @@ fn printLine(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
             try list.append(allocator, ' ');
         }
 
-        if (byte >= 0x20 and byte <= 0x7E) {
+        if (std.ascii.isPrint(byte)) {
             try list.print(allocator, "{c}", .{byte});
         } else {
             try list.append(allocator, '.');

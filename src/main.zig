@@ -78,30 +78,46 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
     };
     
     if (std.mem.startsWith(u8, command, "exit")) {
+        
         con.write("Exit...");
         return false;
+
     } else if (std.mem.startsWith(u8, command, "attach")) {
+
         if (memory.*) |*mem_ptr| mem_ptr.deinit();
 
         memory.* = try attachToProcess(allocator, command);
+
     } else if (std.mem.startsWith(u8, command, "readbytes")) {
+
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleReadBytes(&command_options, command);
 
     } else if (std.mem.startsWith(u8, command, "write")) {
+
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleWrite(&command_options, command);
+
     } else if (std.mem.startsWith(u8, command, "ps")) {
         try handlePs(&command_options, command);
     } else if (std.mem.startsWith(u8, command, "readmod")) {
+
         if (!try isProcessAttached(memory.*, con))
             return true;
 
         try handleReadMod(&command_options, command);
+
+    } else if (std.mem.startsWith(u8, command, "readptr")) {
+        
+        if (!try isProcessAttached(memory.*, con))
+            return true;
+
+        try handleReadPtr(&command_options, command);
+    
     } else if (std.mem.startsWith(u8, command, "writeptr")) {
 
         // TODO
@@ -110,7 +126,6 @@ fn handleCommands(allocator: std.mem.Allocator, memory: *?mem.Memory, con: *cons
         
         try handleWriteMod(&command_options, command);
         
-
     } else if (std.mem.startsWith(u8, command, "help")) {
         printHelpMessage(con);
     } else {
@@ -137,6 +152,9 @@ fn printHelpMessage(con: *console.Console) void {
         \\Read Module+Address with type support.
         \\  readmod   <module.dll+RelativeAddress> <int/float/string/bytes:size>
         \\
+        \\Read Module+Address+AdditionalAddresses with type support.
+        \\  readptr   <module.dll+RelativeAddress+AdditionalAddresses> <int/float/string>
+        \\
         \\Write memory
         \\  write     <AddressInHex> <int/float/string> <Value>
         \\
@@ -154,8 +172,6 @@ fn printHelpMessage(con: *console.Console) void {
     ;
 
     con.write(help_text);
-
-    
 }
 
 fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
@@ -165,6 +181,46 @@ fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
     }
 
     return true;
+
+    
+}
+ // readptr client.dll+2222+22+33
+ // TODO!!!
+fn handleReadPtr(options: *CommandOptions, command: []const u8) !void {
+    const args = try makeCommandArgsList(options.allocator, command);
+    defer options.allocator.free(args);
+
+    var module_and_addresses = std.mem.tokenizeScalar(u8, args[1], '+');
+
+    const module_name = module_and_addresses.next().?;
+    const rel_address_str = module_and_addresses.next().?;
+
+    const rel_address = try std.fmt.parseInt(usize, rel_address_str, 16);
+
+    var additional_addresses = std.ArrayList(usize).empty;
+    defer additional_addresses.deinit(options.allocator);
+
+    while (module_and_addresses.next()) |addr_str| {
+
+        const add_addr = std.fmt.parseInt(usize, addr_str, 16) catch break;
+        try additional_addresses.append(options.allocator, add_addr);
+    }
+
+    if (additional_addresses.items.len == 0)
+        return error.InvalidReadPtrArgs;
+
+    const absolute_address = try getAbsoluteAddress(options, module_name, rel_address);
+    // const type_name = args[2];
+
+    var read_addr = try options.memory.read_struct(absolute_address, usize);
+
+    for (additional_addresses.items) |address| {
+        read_addr = try options.memory.read_struct(read_addr + address, usize);
+    }
+
+    const read_value = try options.memory.read_struct(read_addr, u32);
+
+    options.console.print("Read Value: {d}", .{ read_value });
 }
 
 fn handleWriteMod(options: *CommandOptions, command: []const u8) !void {
@@ -202,9 +258,7 @@ fn handleReadMod(options: *CommandOptions, command: []const u8) !void {
 
     const module_name = module_and_addr.next().?;
     const rel_address_str = module_and_addr.next().?;
-    
     const rel_address = try std.fmt.parseInt(usize, rel_address_str, 16);
-
     const absolute_address = try getAbsoluteAddress(options, module_name, rel_address);
 
     const type_name = args[2];
