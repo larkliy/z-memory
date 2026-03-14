@@ -184,8 +184,7 @@ fn isProcessAttached(memory: ?mem.Memory, con: *console.Console) !bool {
 
     
 }
- // readptr client.dll+2222+22+33
- // TODO!!!
+
 fn handleReadPtr(options: *CommandOptions, command: []const u8) !void {
     const args = try makeCommandArgsList(options.allocator, command);
     defer options.allocator.free(args);
@@ -210,7 +209,7 @@ fn handleReadPtr(options: *CommandOptions, command: []const u8) !void {
         return error.InvalidReadPtrArgs;
 
     const absolute_address = try getAbsoluteAddress(options, module_name, rel_address);
-    // const type_name = args[2];
+    const type_name = args[2];
 
     var read_addr = try options.memory.read_struct(absolute_address, usize);
 
@@ -218,9 +217,18 @@ fn handleReadPtr(options: *CommandOptions, command: []const u8) !void {
         read_addr = try options.memory.read_struct(read_addr + address, usize);
     }
 
-    const read_value = try options.memory.read_struct(read_addr, u32);
+    if (std.mem.eql(u8, type_name, "int")) {
+        const read_value = try options.memory.read_struct(read_addr, u32);
+        options.console.print("Int read: {d}", .{ read_value });
+    } else if (std.mem.eql(u8, type_name, "float")) {
+        const read_value = try options.memory.read_struct(read_addr, f32);
+        options.console.print("Float read: {d}", .{ read_value });
+    } else if (std.mem.eql(u8, type_name, "string")) {
+        const string_read = try options.memory.read_string(read_addr);
+        defer options.allocator.free(string_read);
 
-    options.console.print("Read Value: {d}", .{ read_value });
+        options.console.print("String read: {s}", .{ string_read });
+    }
 }
 
 fn handleWriteMod(options: *CommandOptions, command: []const u8) !void {

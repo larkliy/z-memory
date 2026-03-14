@@ -40,6 +40,20 @@ pub const Memory = struct {
         return std.mem.bytesToValue(T, &buffer);
     }
 
+    pub fn read_string(self: *Memory, address: u64) ![]const u8 {
+
+        var str_read = std.ArrayList(u8).empty;
+        var beg_address = address;
+        
+        while (str_read.items[str_read.items.len-1] != 0) {
+            try str_read.append(self.allocator, try read_struct(self, address, u8));
+            
+            beg_address += 1;
+        }
+
+        return try str_read.toOwnedSlice(self.allocator);
+    }
+
     pub fn write(self: *Memory, address: u64, buffer: []const u8) !usize {
         const written = try win.WriteProcessMemory(
             self.process_handle, 
